@@ -1,0 +1,10 @@
+{
+  "name": "school-docs-ds",
+  "type": "azureblob",
+  "credentials": {
+    "connectionString": "ResourceId=@@STORAGE_ACCOUNT_ID@@;"
+  },
+  "container": {
+    "name": "@@DOCS_CONTAINER@@"
+  }
+}

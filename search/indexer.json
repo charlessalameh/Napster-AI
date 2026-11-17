@@ -1,0 +1,12 @@
+{
+  "name": "school-indexer",
+  "dataSourceName": "school-docs-ds",
+  "targetIndexName": "@@INDEX_NAME@@",
+  "skillsetName": "school-skillset",
+  "parameters": {
+    "configuration": {
+      "dataToExtract": "contentAndMetadata",
+      "parsingMode": "default"
+    }
+  }
+}

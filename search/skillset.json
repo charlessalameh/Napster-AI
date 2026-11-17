@@ -1,0 +1,54 @@
+{
+  "name": "school-skillset",
+  "description": "Split documents into chunks, embed each chunk, write one search document per chunk.",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "split-into-chunks",
+      "description": "About 2000 characters per chunk with overlap so answers are not cut in half.",
+      "context": "/document",
+      "textSplitMode": "pages",
+      "maximumPageLength": 2000,
+      "pageOverlapLength": 200,
+      "inputs": [
+        { "name": "text", "source": "/document/content" }
+      ],
+      "outputs": [
+        { "name": "textItems", "targetName": "pages" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embed-chunks",
+      "description": "No apiKey on purpose: the search service uses its Managed Identity.",
+      "context": "/document/pages/*",
+      "resourceUri": "@@OPENAI_ENDPOINT@@",
+      "deploymentId": "@@EMBEDDING_DEPLOYMENT@@",
+      "modelName": "@@EMBEDDING_MODEL@@",
+      "dimensions": 1536,
+      "inputs": [
+        { "name": "text", "source": "/document/pages/*" }
+      ],
+      "outputs": [
+        { "name": "embedding", "targetName": "text_vector" }
+      ]
+    }
+  ],
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "@@INDEX_NAME@@",
+        "parentKeyFieldName": "parent_id",
+        "sourceContext": "/document/pages/*",
+        "mappings": [
+          { "name": "chunk", "source": "/document/pages/*" },
+          { "name": "text_vector", "source": "/document/pages/*/text_vector" },
+          { "name": "title", "source": "/document/metadata_storage_name" }
+        ]
+      }
+    ],
+    "parameters": {
+      "projectionMode": "skipIndexingParentDocuments"
+    }
+  }
+}
