@@ -43,7 +43,7 @@ fi
 
 # 3. Trust the managed identity: it proves the app's identity in place of a client secret.
 CRED_NAME="web-app-managed-identity"
-if az ad app federated-credential list --id "$APP_ID" --query "[?name=='$CRED_NAME'].name" -o tsv | grep -q .; then
+if [[ -n "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='$CRED_NAME'].name" -o tsv)" ]]; then
   echo "Federated credential already exists"
 else
   az ad app federated-credential create --id "$APP_ID" --parameters "{

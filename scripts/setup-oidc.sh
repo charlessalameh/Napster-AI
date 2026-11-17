@@ -37,7 +37,7 @@ SP_OBJECT_ID="$(az ad sp show --id "$APP_ID" --query id -o tsv)"
 # 3. Federated credentials: workflows run by workflow_dispatch on the main branch.
 add_federated_credential() {
   local name="$1" subject="$2"
-  if az ad app federated-credential list --id "$APP_ID" --query "[?name=='$name'].name" -o tsv | grep -q .; then
+  if [[ -n "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='$name'].name" -o tsv)" ]]; then
     echo "Federated credential $name already exists"
     return
   fi
@@ -55,7 +55,7 @@ add_federated_credential "github-$BRANCH" "repo:$REPO:ref:refs/heads/$BRANCH"
 #    create the RBAC role assignments between the services (Managed Identity design).
 assign_role() {
   local role="$1" scope="$2"
-  if az role assignment list --assignee "$SP_OBJECT_ID" --role "$role" --scope "$scope" --query '[0].id' -o tsv | grep -q .; then
+  if [[ -n "$(az role assignment list --assignee "$SP_OBJECT_ID" --role "$role" --scope "$scope" --query '[0].id' -o tsv)" ]]; then
     echo "Role '$role' already assigned"
   else
     az role assignment create --assignee-object-id "$SP_OBJECT_ID" --assignee-principal-type ServicePrincipal \

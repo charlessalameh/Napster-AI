@@ -49,21 +49,24 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 
 echo "Test 1: school bus price"
 r="$(ask 'How much is the school bus?')"
-echo "  answer:  $(echo "$r" | field answer)"
-echo "  sources: $(echo "$r" | field sources)"
-echo "$r" | field answer | grep -Eq '7,?000' || fail "expected AED 7,000 in the answer"
-echo "$r" | field sources | grep -q 'fees-transport.txt' || fail "expected fees-transport.txt as a source"
+answer="$(echo "$r" | field answer)"; sources="$(echo "$r" | field sources)"
+echo "  answer:  $answer"
+echo "  sources: $sources"
+grep -Eq '7,?000' <<<"$answer" || fail "expected AED 7,000 in the answer"
+grep -q 'fees-transport.txt' <<<"$sources" || fail "expected fees-transport.txt as a source"
 
 echo "Test 2: admission documents"
 r="$(ask 'What documents do I need for admission?')"
-echo "  answer:  $(echo "$r" | field answer)"
-echo "$r" | field answer | grep -qi 'passport' || fail "expected the document list (passport)"
+answer="$(echo "$r" | field answer)"
+echo "  answer:  $answer"
+grep -qi 'passport' <<<"$answer" || fail "expected the document list (passport)"
 
 echo "Test 3: question not covered by the documents"
 r="$(ask 'Do you have a swimming pool?')"
-echo "  answer:  $(echo "$r" | field answer)"
-echo "$r" | field answer | grep -Eqi "admissions|don't have|do not have|not sure|no information" \
+answer="$(echo "$r" | field answer)"
+echo "  answer:  $answer"
+grep -Eqi "admissions|don't have|do not have|not sure|no information" <<<"$answer" \
   || fail "expected a refusal that suggests contacting admissions"
-echo "$r" | field answer | grep -Eqi 'yes, we have|we have a (swimming )?pool' && fail "agent invented a pool"
+if grep -Eqi 'yes, we have|we have a (swimming )?pool' <<<"$answer"; then fail "agent invented a pool"; fi
 
 echo "All smoke tests passed."
