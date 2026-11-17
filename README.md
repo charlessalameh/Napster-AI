@@ -61,6 +61,24 @@ cd ../..
 The script prints four values; add them as GitHub repository **variables** (they are
 identifiers, not secrets). The bootstrap state file stays local and is git-ignored.
 
+## Run the app locally (optional)
+
+After a deploy and `scripts/bootstrap-search.sh`, you can run the app on your laptop against
+the real Azure services. Your `az login` account needs the OpenAI User and Search Index Data
+Reader roles on those resources (the deployer already has Search access; add the OpenAI role
+if needed).
+
+```bash
+cd app
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export AZURE_OPENAI_ENDPOINT=$(terraform -chdir=../infra output -raw openai_endpoint)
+export AZURE_OPENAI_CHAT_DEPLOYMENT=chat
+export AZURE_SEARCH_ENDPOINT=$(terraform -chdir=../infra output -raw search_endpoint)
+export AZURE_SEARCH_INDEX=school
+python app.py          # http://127.0.0.1:8000
+```
+
 ## Status
 
 Build order (see `CLAUDE.md`):
@@ -69,7 +87,7 @@ Build order (see `CLAUDE.md`):
 2. [x] `infra/bootstrap-state` + `scripts/setup-oidc.sh`
 3. [x] Main Terraform
 4. [x] `search/*.json` + `scripts/bootstrap-search.sh`
-5. [ ] Flask app
+5. [x] Flask app
 6. [ ] `deploy.yml` / `destroy.yml` + smoke test
 7. [ ] Optional hardening (Easy Auth, Private Endpoints)
 

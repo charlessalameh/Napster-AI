@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Al Noor School Front Desk</title>
+  <style>
+    :root { --blue: #1d4ed8; --bg: #f5f7fb; --ink: #1f2937; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .sub { color: #6b7280; margin: 0 0 20px; }
+    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    input[type=text] { flex: 1; padding: 12px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 8px; }
+    button, select { padding: 12px 16px; font-size: 1rem; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; }
+    button.primary { background: var(--blue); color: #fff; border-color: var(--blue); cursor: pointer; }
+    button.listening { background: #dc2626; border-color: #dc2626; }
+    #status { min-height: 1.4em; color: #6b7280; font-size: .9rem; margin: 4px 0 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .q { color: #6b7280; font-size: .9rem; margin-bottom: 6px; }
+    .a { font-size: 1.05rem; line-height: 1.5; }
+    .meta { margin-top: 10px; font-size: .8rem; color: #6b7280; }
+    .err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Al Noor International School</h1>
+  <p class="sub">Front desk assistant. Ask about admissions, fees, the bus or the school day.</p>
+
+  <div class="row">
+    <button id="speak" class="primary" type="button">Speak</button>
+    <input id="question" type="text" placeholder="...or type your question" maxlength="500" autocomplete="off">
+    <button id="send" type="button">Ask</button>
+  </div>
+  <div class="row">
+    <select id="lang" aria-label="Language">
+      <option value="en-US">English</option>
+      <option value="ar-AE">العربية</option>
+    </select>
+  </div>
+  <div id="status" aria-live="polite"></div>
+  <div id="answers"></div>
+</main>
+
+<script>
+  // Speech in and out runs in the browser (Web Speech API, Chrome/Edge). The server only sees text.
+  const $ = (id) => document.getElementById(id);
+  const speakBtn = $("speak"), sendBtn = $("send"), input = $("question");
+  const statusEl = $("status"), answersEl = $("answers"), langSel = $("lang");
+
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognizer = null;
+
+  function setStatus(text) { statusEl.textContent = text; }
+
+  // ---- Speech out ----
+  function say(text) {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = langSel.value;
+    speechSynthesis.speak(u);
+  }
+
+  // ---- Ask the backend ----
+  async function ask(question) {
+    question = question.trim();
+    if (!question) return;
+    setStatus("Thinking...");
+    const card = document.createElement("div");
+    card.className = "card";
+    const q = document.createElement("div");
+    q.className = "q";
+    q.textContent = question;           // textContent, never innerHTML: no script injection
+    const a = document.createElement("div");
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    card.append(q, a, meta);
+    answersEl.prepend(card);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      a.className = "a";
+      a.textContent = data.answer;
+      meta.textContent = `Sources: ${data.sources.join(", ") || "none"} · ${data.ms} ms`;
+      setStatus("");
+      say(data.answer);
+    } catch (err) {
+      a.className = "a err";
+      a.textContent = err.message;
+      setStatus("");
+    }
+  }
+
+  // ---- Speech in ----
+  speakBtn.addEventListener("click", () => {
+    speechSynthesis.cancel();           // barge-in: pressing Speak stops the agent talking
+    if (!Recognition) {
+      setStatus("Speech input needs Chrome or Edge. You can type instead.");
+      return;
+    }
+    if (recognizer) { recognizer.stop(); return; }   // second press = stop listening
+
+    recognizer = new Recognition();
+    recognizer.lang = langSel.value;
+    recognizer.interimResults = false;
+    recognizer.onstart = () => { speakBtn.classList.add("listening"); speakBtn.textContent = "Listening..."; setStatus(""); };
+    recognizer.onresult = (e) => { const text = e.results[0][0].transcript; input.value = text; ask(text); };
+    recognizer.onerror = (e) => setStatus("Microphone problem: " + e.error);
+    recognizer.onend = () => { speakBtn.classList.remove("listening"); speakBtn.textContent = "Speak"; recognizer = null; };
+    recognizer.start();
+  });
+
+  sendBtn.addEventListener("click", () => { speechSynthesis.cancel(); ask(input.value); input.value = ""; });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
+</script>
+</body>
+</html>
