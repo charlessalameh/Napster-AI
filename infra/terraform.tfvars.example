@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (git-ignored) for local runs. CI passes these as TF_VAR_*.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Re-point the demo by changing these (e.g. a UAE customer conversation):
+# location    = "uaenorth"
+# name_prefix = "schooldemo"
+# model_sku   = "Standard"   # keep data in region; check model availability first

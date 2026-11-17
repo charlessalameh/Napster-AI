@@ -1,0 +1,5 @@
+# Copy to backend.hcl (git-ignored via *.hcl below) and fill from:
+#   cd infra/bootstrap-state && terraform output backend_config
+resource_group_name  = "schooldemo-tfstate-rg"
+storage_account_name = "schooldemotfxxxxx"
+container_name       = "tfstate"

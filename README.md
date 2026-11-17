@@ -67,7 +67,7 @@ Build order (see `CLAUDE.md`):
 
 1. [x] Scaffold repo, README, sample data
 2. [x] `infra/bootstrap-state` + `scripts/setup-oidc.sh`
-3. [ ] Main Terraform
+3. [x] Main Terraform
 4. [ ] `search/*.json` + `scripts/bootstrap-search.sh`
 5. [ ] Flask app
 6. [ ] `deploy.yml` / `destroy.yml` + smoke test
