@@ -1,0 +1,58 @@
+name: destroy
+
+# Run from the Actions tab. You must type "destroy" in the confirmation box.
+# Removes the whole demo (not the Terraform state storage), so costs drop to ~zero.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+
+concurrency:
+  group: school-agent-infra
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  destroy:
+    if: ${{ inputs.confirm == 'destroy' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init (remote state)
+        working-directory: infra
+        run: |
+          STATE_RG=$(az storage account show --name "${{ vars.TFSTATE_STORAGE_ACCOUNT }}" --query resourceGroup -o tsv)
+          terraform init -input=false \
+            -backend-config="resource_group_name=$STATE_RG" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate"
+
+      - name: Terraform destroy
+        working-directory: infra
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Summary
+        run: echo "### Demo destroyed. Run **deploy** to bring it back." >> "$GITHUB_STEP_SUMMARY"

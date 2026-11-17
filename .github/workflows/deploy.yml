@@ -1,0 +1,94 @@
+name: deploy
+
+# Run from the Actions tab: "Run workflow" on the main branch.
+# plan -> apply -> bootstrap search index -> deploy app -> smoke test
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: Azure region (needs the chat and embedding models)
+        default: swedencentral
+        required: true
+      plan_only:
+        description: Only show the plan, do not create anything
+        type: boolean
+        default: false
+
+# Never run two deploys/destroys at the same time against the same state.
+concurrency:
+  group: school-agent-infra
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC login to Azure
+  contents: read
+
+env:
+  # Repository variables set by scripts/setup-oidc.sh (identifiers, not secrets).
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_location: ${{ inputs.location }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # so `terraform output -raw` is clean
+
+      - name: Terraform init (remote state)
+        working-directory: infra
+        run: |
+          STATE_RG=$(az storage account show --name "${{ vars.TFSTATE_STORAGE_ACCOUNT }}" --query resourceGroup -o tsv)
+          terraform init -input=false \
+            -backend-config="resource_group_name=$STATE_RG" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate"
+
+      - name: Terraform plan
+        working-directory: infra
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: ${{ !inputs.plan_only }}
+        working-directory: infra
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Bootstrap search (upload docs, index, indexer)
+        if: ${{ !inputs.plan_only }}
+        run: ./scripts/bootstrap-search.sh
+
+      - name: Deploy the web app
+        if: ${{ !inputs.plan_only }}
+        run: |
+          RG=$(terraform -chdir=infra output -raw resource_group_name)
+          APP=$(terraform -chdir=infra output -raw web_app_name)
+          (cd app && zip -qr ../app.zip . -x '.venv/*' '__pycache__/*')
+          # App Service builds it (SCM_DO_BUILD_DURING_DEPLOYMENT=true) and starts gunicorn.
+          az webapp deploy --resource-group "$RG" --name "$APP" --src-path app.zip --type zip
+
+      - name: Smoke test
+        if: ${{ !inputs.plan_only }}
+        run: ./scripts/smoke-test.sh "$(terraform -chdir=infra output -raw web_app_url)"
+
+      - name: Summary
+        if: ${{ !inputs.plan_only }}
+        run: |
+          echo "### Demo is up" >> "$GITHUB_STEP_SUMMARY"
+          echo "$(terraform -chdir=infra output -raw web_app_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run the **destroy** workflow when you are done to stop the costs." >> "$GITHUB_STEP_SUMMARY"

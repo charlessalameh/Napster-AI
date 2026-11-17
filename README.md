@@ -61,6 +61,19 @@ cd ../..
 The script prints four values; add them as GitHub repository **variables** (they are
 identifiers, not secrets). The bootstrap state file stays local and is git-ignored.
 
+## Deploy and destroy (GitHub Actions)
+
+After the one-time setup above and pushing the repo to GitHub (the OIDC login only works for
+the repo and `main` branch you gave `setup-oidc.sh`):
+
+1. Actions tab > **deploy** > Run workflow (branch `main`). Tick *plan_only* first if you want
+   to see what it would create. It runs plan, apply, search bootstrap, app deploy and the
+   smoke test, and prints the demo URL in the run summary (about 10-15 minutes).
+2. When finished with the demo: Actions > **destroy** > type `destroy`. The state storage is
+   kept, so the next deploy works from scratch with no manual steps.
+
+`scripts/smoke-test.sh <url>` can also be run by hand against any deployed URL.
+
 ## Run the app locally (optional)
 
 After a deploy and `scripts/bootstrap-search.sh`, you can run the app on your laptop against
@@ -88,7 +101,7 @@ Build order (see `CLAUDE.md`):
 3. [x] Main Terraform
 4. [x] `search/*.json` + `scripts/bootstrap-search.sh`
 5. [x] Flask app
-6. [ ] `deploy.yml` / `destroy.yml` + smoke test
+6. [x] `deploy.yml` / `destroy.yml` + smoke test
 7. [ ] Optional hardening (Easy Auth, Private Endpoints)
 
 ## Cost control
