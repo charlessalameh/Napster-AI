@@ -38,12 +38,35 @@ Blob Storage: school-docs
 | Storage Blob Data Reader | search service | Storage account |
 | Cognitive Services OpenAI User | search service | Azure OpenAI |
 
+## Getting started (one-time, run locally)
+
+Needs the Azure CLI, Terraform >= 1.6 and a subscription where you are Owner.
+
+```bash
+az login
+az account show --query id -o tsv          # your subscription id
+
+# 1. Remote state storage (keyless, Entra ID auth, versioned)
+cd infra/bootstrap-state
+terraform init
+terraform apply -var subscription_id=<SUBSCRIPTION_ID>
+# If it fails on the container with a 403, wait a minute (role propagation) and re-run apply.
+terraform output -raw storage_account_name
+
+# 2. GitHub OIDC login (no client secret)
+cd ../..
+./scripts/setup-oidc.sh <github-owner>/<repo> <storage_account_name>
+```
+
+The script prints four values; add them as GitHub repository **variables** (they are
+identifiers, not secrets). The bootstrap state file stays local and is git-ignored.
+
 ## Status
 
 Build order (see `CLAUDE.md`):
 
 1. [x] Scaffold repo, README, sample data
-2. [ ] `infra/bootstrap-state` + `scripts/setup-oidc.sh`
+2. [x] `infra/bootstrap-state` + `scripts/setup-oidc.sh`
 3. [ ] Main Terraform
 4. [ ] `search/*.json` + `scripts/bootstrap-search.sh`
 5. [ ] Flask app
