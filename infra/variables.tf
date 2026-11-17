@@ -101,3 +101,41 @@ variable "tags" {
     project = "school-agent-demo"
   }
 }
+
+# --- Optional hardening (both off by default; see README "Hardening") ---
+
+variable "enable_private_networking" {
+  description = "VNet integration for the web app + Private Endpoints for OpenAI, Search and Storage."
+  type        = bool
+  default     = false
+}
+
+variable "vnet_cidr" {
+  description = "Address space of the VNet (used only when enable_private_networking is true)."
+  type        = string
+  default     = "10.20.0.0/16"
+}
+
+variable "enable_easy_auth" {
+  description = "Require Entra ID sign-in for the whole web app. Run scripts/setup-easyauth.sh first."
+  type        = bool
+  default     = false
+}
+
+variable "easy_auth_client_id" {
+  description = "Client ID of the Entra app registration (printed by scripts/setup-easyauth.sh)."
+  type        = string
+  default     = ""
+}
+
+variable "easy_auth_identity_id" {
+  description = "Resource ID of the persistent user-assigned identity from infra/bootstrap-state."
+  type        = string
+  default     = ""
+}
+
+variable "easy_auth_identity_client_id" {
+  description = "Client ID of that user-assigned identity."
+  type        = string
+  default     = ""
+}

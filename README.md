@@ -102,7 +102,34 @@ Build order (see `CLAUDE.md`):
 4. [x] `search/*.json` + `scripts/bootstrap-search.sh`
 5. [x] Flask app
 6. [x] `deploy.yml` / `destroy.yml` + smoke test
-7. [ ] Optional hardening (Easy Auth, Private Endpoints)
+7. [x] Optional hardening (Easy Auth, Private Endpoints)
+
+## Hardening (optional, both off by default)
+
+**Sign-in with Entra ID (Easy Auth).** Puts a Microsoft login in front of the whole site; only
+people in your own tenant get in. No client secret: the app registration trusts a persistent
+managed identity (created in `infra/bootstrap-state`), so nothing expires and nothing is
+stored. The web app URL is stable across destroy/deploy, so this is set up once:
+
+```bash
+cd infra/bootstrap-state && terraform apply -var subscription_id=<ID>   # creates the identity
+cd ../..
+./scripts/setup-easyauth.sh https://<web-app>.azurewebsites.net         # url from the deploy summary
+```
+
+Add the three printed values as GitHub repository variables (`EASY_AUTH_CLIENT_ID`,
+`EASY_AUTH_IDENTITY_ID`, `EASY_AUTH_IDENTITY_CLIENT_ID`) and re-run **deploy**. Delete
+`EASY_AUTH_CLIENT_ID` to turn it off. With sign-in on, the smoke test only checks that `/` and
+`/api/chat` demand a login; try the agent in a browser.
+
+**Private networking.** Set the repository variable `ENABLE_PRIVATE_NETWORKING` to `true` and
+re-run **deploy**. It adds a VNet, VNet integration for the web app, and Private Endpoints
+(with private DNS) for Azure OpenAI, AI Search and Blob Storage, so the app's traffic to them
+stays on the Microsoft network. (About $22/month for the three endpoints while deployed.)
+
+Known limit, by design: the three services keep their public endpoint (still Entra ID + RBAC
+only, keys are off). The deploy pipeline and Search's indexer need it. Closing it fully
+means shared private links for the indexer, which needs a higher Search tier.
 
 ## Cost control
 

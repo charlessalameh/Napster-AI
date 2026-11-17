@@ -17,6 +17,19 @@ for i in $(seq 1 40); do
   sleep 15
 done
 
+# With Easy Auth on, nobody can call the chat API without signing in. Check that it is
+# protected (redirect to login or 401) instead of testing the answers. Test those by hand.
+if [[ "${EXPECT_AUTH:-false}" == "true" ]]; then
+  echo "Easy Auth is on: checking the site is protected"
+  for path in / /api/chat; do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$BASE$path" -H 'Content-Type: application/json' --data '{"question":"hi"}')"
+    echo "  $path without login -> HTTP $code"
+    [[ "$code" == "302" || "$code" == "401" ]] || { echo "FAIL: $path should require sign-in" >&2; exit 1; }
+  done
+  echo "Protected. Sign in in a browser to try the agent."
+  exit 0
+fi
+
 ask() { # ask "<question>" -> prints the JSON reply (retries: first call can be slow)
   local n=0 out
   until out="$(curl -fsS --max-time 60 -X POST "$BASE/api/chat" \

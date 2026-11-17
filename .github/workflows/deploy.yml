@@ -32,6 +32,12 @@ env:
   TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_location: ${{ inputs.location }}
   TF_IN_AUTOMATION: "true"
+  # Optional hardening, driven by repository variables (all unset = off):
+  TF_VAR_enable_private_networking: ${{ vars.ENABLE_PRIVATE_NETWORKING == 'true' }}
+  TF_VAR_enable_easy_auth: ${{ vars.EASY_AUTH_CLIENT_ID != '' }}
+  TF_VAR_easy_auth_client_id: ${{ vars.EASY_AUTH_CLIENT_ID }}
+  TF_VAR_easy_auth_identity_id: ${{ vars.EASY_AUTH_IDENTITY_ID }}
+  TF_VAR_easy_auth_identity_client_id: ${{ vars.EASY_AUTH_IDENTITY_CLIENT_ID }}
 
 jobs:
   deploy:
@@ -83,6 +89,9 @@ jobs:
 
       - name: Smoke test
         if: ${{ !inputs.plan_only }}
+        env:
+          # With Easy Auth on, the chat API needs a sign-in, so the test checks that it is protected.
+          EXPECT_AUTH: ${{ vars.EASY_AUTH_CLIENT_ID != '' }}
         run: ./scripts/smoke-test.sh "$(terraform -chdir=infra output -raw web_app_url)"
 
       - name: Summary

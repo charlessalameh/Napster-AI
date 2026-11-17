@@ -46,7 +46,7 @@ proxy API; AI Search = customer knowledge base; web page = website / kiosk / Tea
 5. Flask app using `DefaultAzureCredential` for AOAI and Search; system prompt restricts answers
    to sources, short spoken replies, same language as the question.
 6. `deploy.yml` + `destroy.yml`; smoke test asks "How much is the school bus?" expects AED 7,000.
-7. Optional: Entra Easy Auth, Private Endpoints + VNet integration behind a variable flag.
+7. **(done)** Optional: Entra Easy Auth, Private Endpoints + VNet integration behind a variable flag.
 
 ## Acceptance tests
 - "How much is the school bus?" -> AED 7,000, cites fees-transport.txt.

@@ -24,3 +24,15 @@ output "backend_config" {
     use_azuread_auth     = true
   EOT
 }
+
+output "easyauth_identity_id" {
+  value = azurerm_user_assigned_identity.easyauth.id
+}
+
+output "easyauth_identity_client_id" {
+  value = azurerm_user_assigned_identity.easyauth.client_id
+}
+
+output "easyauth_identity_principal_id" {
+  value = azurerm_user_assigned_identity.easyauth.principal_id
+}

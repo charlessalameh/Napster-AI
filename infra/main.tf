@@ -1,15 +1,12 @@
 data "azurerm_client_config" "current" {}
 
-# Short random suffix so global names (storage, OpenAI subdomain, web app) never collide,
-# including after destroy -> deploy.
-resource "random_string" "suffix" {
-  length  = 5
-  upper   = false
-  special = false
-}
-
 locals {
-  base = "${var.name_prefix}-${random_string.suffix.result}"
+  # Short suffix so global names (storage, OpenAI subdomain, web app) do not collide with
+  # other people's. Derived from the subscription + prefix instead of random, so it is the
+  # SAME after every destroy -> deploy. That keeps the web app URL stable, which Easy Auth's
+  # redirect URI depends on.
+  suffix = substr(sha1("${var.subscription_id}/${var.name_prefix}"), 0, 5)
+  base   = "${var.name_prefix}-${local.suffix}"
 }
 
 resource "azurerm_resource_group" "main" {
@@ -42,7 +39,7 @@ resource "azurerm_application_insights" "main" {
 # Holds the school documents. No account keys: Entra ID + RBAC only.
 
 resource "azurerm_storage_account" "docs" {
-  name                            = "${var.name_prefix}st${random_string.suffix.result}"
+  name                            = "${var.name_prefix}st${local.suffix}"
   resource_group_name             = azurerm_resource_group.main.name
   location                        = azurerm_resource_group.main.location
   account_tier                    = "Standard"
@@ -147,8 +144,49 @@ resource "azurerm_linux_web_app" "main" {
   https_only          = true
   tags                = var.tags
 
+  # Optional hardening: send all outbound traffic through the VNet (see network.tf).
+  virtual_network_subnet_id = var.enable_private_networking ? azurerm_subnet.integration[0].id : null
+
   identity {
-    type = "SystemAssigned"
+    type = var.enable_easy_auth ? "SystemAssigned, UserAssigned" : "SystemAssigned"
+    # The persistent identity (created in infra/bootstrap-state) that Easy Auth uses
+    # instead of a client secret.
+    identity_ids = var.enable_easy_auth ? [var.easy_auth_identity_id] : null
+  }
+
+  lifecycle {
+    precondition {
+      condition = !var.enable_easy_auth || (
+        var.easy_auth_client_id != "" && var.easy_auth_identity_id != "" && var.easy_auth_identity_client_id != ""
+      )
+      error_message = "enable_easy_auth needs easy_auth_client_id, easy_auth_identity_id and easy_auth_identity_client_id. Run scripts/setup-easyauth.sh."
+    }
+  }
+
+  # Optional hardening: Entra ID sign-in in front of the whole site (Easy Auth).
+  dynamic "auth_settings_v2" {
+    for_each = var.enable_easy_auth ? [1] : []
+    content {
+      auth_enabled           = true
+      require_authentication = true
+      unauthenticated_action = "RedirectToLoginPage"
+      default_provider       = "azureactivedirectory"
+      # App Service's own health probe must keep working without a login.
+      excluded_paths = ["/health"]
+
+      login {
+        token_store_enabled = false
+      }
+
+      active_directory_v2 {
+        client_id            = var.easy_auth_client_id
+        tenant_auth_endpoint = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
+        # No client secret: the app registration trusts the managed identity (federated
+        # credential). This setting name tells App Service to use it.
+        client_secret_setting_name = "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID"
+        # The app registration is single-tenant, so only people from your own tenant can sign in.
+      }
+    }
   }
 
   site_config {
@@ -157,6 +195,8 @@ resource "azurerm_linux_web_app" "main" {
     ftps_state          = "Disabled"
     http2_enabled       = true
     health_check_path   = "/health"
+    # With VNet integration, route everything (including calls to the private endpoints) via the VNet.
+    vnet_route_all_enabled = var.enable_private_networking
 
     health_check_eviction_time_in_min = 5
     app_command_line                  = "gunicorn --bind=0.0.0.0 --timeout 120 app:app"
@@ -167,15 +207,18 @@ resource "azurerm_linux_web_app" "main" {
   }
 
   # Endpoints and names only. No keys anywhere.
-  app_settings = {
-    SCM_DO_BUILD_DURING_DEPLOYMENT        = "true"
-    AZURE_OPENAI_ENDPOINT                 = azurerm_cognitive_account.openai.endpoint
-    AZURE_OPENAI_CHAT_DEPLOYMENT          = azurerm_cognitive_deployment.chat.name
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT     = azurerm_cognitive_deployment.embedding.name
-    AZURE_SEARCH_ENDPOINT                 = "https://${azurerm_search_service.main.name}.search.windows.net"
-    AZURE_SEARCH_INDEX                    = var.search_index_name
-    APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
-  }
+  app_settings = merge(
+    var.enable_easy_auth ? { OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID = var.easy_auth_identity_client_id } : {},
+    {
+      SCM_DO_BUILD_DURING_DEPLOYMENT        = "true"
+      AZURE_OPENAI_ENDPOINT                 = azurerm_cognitive_account.openai.endpoint
+      AZURE_OPENAI_CHAT_DEPLOYMENT          = azurerm_cognitive_deployment.chat.name
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT     = azurerm_cognitive_deployment.embedding.name
+      AZURE_SEARCH_ENDPOINT                 = "https://${azurerm_search_service.main.name}.search.windows.net"
+      AZURE_SEARCH_INDEX                    = var.search_index_name
+      APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
+    }
+  )
 }
 
 # --------------------------------------------------------------------- RBAC

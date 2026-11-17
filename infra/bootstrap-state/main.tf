@@ -73,3 +73,14 @@ resource "azurerm_role_assignment" "me_blob" {
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = data.azurerm_client_config.current.object_id
 }
+
+# Persistent identity for the optional Easy Auth hardening. It lives here (not in the main
+# stack) so it survives destroy -> deploy: the Entra app registration trusts THIS identity
+# (federated credential, set up once by scripts/setup-easyauth.sh), so no client secret is
+# ever needed and nothing has to be redone after a rebuild. It has no permissions.
+resource "azurerm_user_assigned_identity" "easyauth" {
+  name                = "${var.name_prefix}-easyauth-id"
+  resource_group_name = azurerm_resource_group.state.name
+  location            = azurerm_resource_group.state.location
+  tags                = var.tags
+}
