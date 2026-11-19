@@ -126,6 +126,48 @@ jobs:
           echo "The web app did not become healthy in time. Check: az webapp log startup show -n $APP -g $RG" >&2
           exit 1
 
+      # On a fresh build the web app starts before its new role on the Key Vault has taken effect, so
+      # the ElevenLabs key reference fails ("AccessToKeyVaultDenied") and stays failed. We saw this on
+      # the first deploy. So: wait until the reference resolves, and re-save the setting (which makes
+      # App Service look again) while it does not. Only runs when the voice is configured.
+      - name: Azure login (refresh before voice check)
+        if: ${{ !inputs.plan_only && vars.KEY_VAULT_NAME != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Make sure the web app can read the ElevenLabs key
+        if: ${{ !inputs.plan_only && vars.KEY_VAULT_NAME != '' }}
+        run: |
+          RG=$(terraform -chdir=infra output -raw resource_group_name)
+          APP=$(terraform -chdir=infra output -raw web_app_name)
+          URL=$(terraform -chdir=infra output -raw web_app_url)
+          REF="@Microsoft.KeyVault(SecretUri=https://${{ vars.KEY_VAULT_NAME }}.vault.azure.net/secrets/elevenlabs-api-key/)"
+          REF_URI="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/config/configreferences/appsettings?api-version=2022-03-01"
+          for i in $(seq 1 12); do
+            status=$(az rest --method get --uri "$REF_URI" --query "value[?name=='ELEVENLABS_API_KEY'].properties.status | [0]" -o tsv || true)
+            echo "  [$i] ELEVENLABS_API_KEY reference: ${status:-unknown}"
+            if [ "$status" = "Resolved" ]; then break; fi
+            az webapp config appsettings set --resource-group "$RG" --name "$APP" \
+              --settings "ELEVENLABS_API_KEY=$REF" --query "[?name=='ELEVENLABS_API_KEY'].name" -o tsv || true
+            sleep 45
+          done
+          if [ "$status" != "Resolved" ]; then
+            echo "::warning::The ElevenLabs key reference did not resolve; the page will use the browser voice."
+            exit 0
+          fi
+          for i in $(seq 1 10); do
+            if curl -s -m 30 "$URL/api/voice" | grep -q '"enabled":true'; then
+              echo "The ElevenLabs voice is on."
+              exit 0
+            fi
+            echo "  [$i] waiting for the app to pick up the key ..."
+            sleep 20
+          done
+          echo "::warning::The key resolved but /api/voice is not enabled yet."
+
       - name: Smoke test
         if: ${{ !inputs.plan_only }}
         env:
