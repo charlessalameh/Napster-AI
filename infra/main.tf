@@ -7,6 +7,18 @@ locals {
   # redirect URI depends on.
   suffix = substr(sha1("${var.subscription_id}/${var.name_prefix}"), 0, 5)
   base   = "${var.name_prefix}-${local.suffix}"
+
+  # Optional ElevenLabs voice: on only when a Key Vault name is given (repository variable KEY_VAULT_NAME).
+  voice_enabled    = var.key_vault_name != ""
+  key_vault_rg     = var.key_vault_resource_group != "" ? var.key_vault_resource_group : "${var.name_prefix}-tfstate-rg"
+  elevenlabs_model = var.elevenlabs_model_id != "" ? var.elevenlabs_model_id : "eleven_multilingual_v2"
+}
+
+# The Key Vault lives in the bootstrap stack (it survives destroy). Only read here.
+data "azurerm_key_vault" "voice" {
+  count               = local.voice_enabled ? 1 : 0
+  name                = var.key_vault_name
+  resource_group_name = local.key_vault_rg
 }
 
 resource "azurerm_resource_group" "main" {
@@ -206,9 +218,15 @@ resource "azurerm_linux_web_app" "main" {
     }
   }
 
-  # Endpoints and names only. No keys anywhere.
+  # Endpoints and names only. No keys anywhere (the ElevenLabs key is a Key Vault REFERENCE:
+  # App Service reads the secret with the web app's managed identity, so the value is never here).
   app_settings = merge(
     var.enable_easy_auth ? { OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID = var.easy_auth_identity_client_id } : {},
+    local.voice_enabled ? {
+      ELEVENLABS_API_KEY  = "@Microsoft.KeyVault(SecretUri=${data.azurerm_key_vault.voice[0].vault_uri}secrets/${var.key_vault_secret_name}/)"
+      ELEVENLABS_VOICE_ID = var.elevenlabs_voice_id
+      ELEVENLABS_MODEL_ID = local.elevenlabs_model
+    } : {},
     {
       SCM_DO_BUILD_DURING_DEPLOYMENT        = "true"
       AZURE_OPENAI_ENDPOINT                 = azurerm_cognitive_account.openai.endpoint
@@ -223,6 +241,14 @@ resource "azurerm_linux_web_app" "main" {
 
 # --------------------------------------------------------------------- RBAC
 # Managed Identity + RBAC only. See README for the table.
+
+# Web app -> Key Vault (read the ElevenLabs key). Only when the voice is switched on.
+resource "azurerm_role_assignment" "web_keyvault" {
+  count                = local.voice_enabled ? 1 : 0
+  scope                = data.azurerm_key_vault.voice[0].id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.main.identity[0].principal_id
+}
 
 # Web app -> OpenAI (generate answers, embed the question)
 resource "azurerm_role_assignment" "web_openai" {

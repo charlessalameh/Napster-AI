@@ -139,3 +139,37 @@ variable "easy_auth_identity_client_id" {
   type        = string
   default     = ""
 }
+
+# --- Optional voice: ElevenLabs text-to-speech (off while key_vault_name is empty) ---
+# The API key itself is NOT a Terraform value. You put it in the Key Vault by hand, and the
+# web app reads it there with its managed identity (a Key Vault reference in its settings).
+
+variable "key_vault_name" {
+  description = "Name of the Key Vault (from infra/bootstrap-state) that holds the ElevenLabs key. Empty = voice off."
+  type        = string
+  default     = ""
+}
+
+variable "key_vault_resource_group" {
+  description = "Resource group of that Key Vault. Empty = the bootstrap group, <name_prefix>-tfstate-rg."
+  type        = string
+  default     = ""
+}
+
+variable "key_vault_secret_name" {
+  description = "Name of the secret that holds the ElevenLabs API key."
+  type        = string
+  default     = "elevenlabs-api-key"
+}
+
+variable "elevenlabs_voice_id" {
+  description = "ElevenLabs voice ID (not a secret)."
+  type        = string
+  default     = ""
+}
+
+variable "elevenlabs_model_id" {
+  description = "ElevenLabs model. Empty = eleven_multilingual_v2 (Arabic, English, French)."
+  type        = string
+  default     = ""
+}

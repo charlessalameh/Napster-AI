@@ -84,3 +84,25 @@ resource "azurerm_user_assigned_identity" "easyauth" {
   location            = azurerm_resource_group.state.location
   tags                = var.tags
 }
+
+# Key Vault for third-party secrets (the ElevenLabs API key). It lives here, not in the main
+# stack, for the same reason as the identity above: it must survive destroy -> deploy, or the
+# key would be deleted every time the demo is destroyed. Access is by Azure roles only (no
+# access policies). The main stack gives the web app the "Key Vault Secrets User" role.
+resource "azurerm_key_vault" "main" {
+  name                       = "${var.name_prefix}-kv-${random_string.suffix.result}" # 3-24 chars
+  resource_group_name        = azurerm_resource_group.state.name
+  location                   = azurerm_resource_group.state.location
+  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  sku_name                   = "standard"
+  rbac_authorization_enabled = true
+  soft_delete_retention_days = 7 # a deleted secret can be recovered for 7 days
+  tags                       = var.tags
+}
+
+# Lets the person running this bootstrap (you) put the secret in with `az keyvault secret set`.
+resource "azurerm_role_assignment" "me_keyvault" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}

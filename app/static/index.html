@@ -38,6 +38,7 @@
     <select id="lang" aria-label="Language">
       <option value="en-US">English</option>
       <option value="ar-AE">العربية</option>
+      <option value="fr-FR">Français</option>
     </select>
   </div>
   <div id="status" aria-live="polite"></div>
@@ -45,7 +46,8 @@
 </main>
 
 <script>
-  // Speech in and out runs in the browser (Web Speech API, Chrome/Edge). The server only sees text.
+  // Speech IN runs in the browser (Web Speech API, Chrome/Edge). Speech OUT uses the ElevenLabs
+  // voice through /api/speak when the server has it configured, else the browser's own voice.
   const $ = (id) => document.getElementById(id);
   const speakBtn = $("speak"), sendBtn = $("send"), input = $("question");
   const statusEl = $("status"), answersEl = $("answers"), langSel = $("lang");
@@ -56,11 +58,47 @@
   function setStatus(text) { statusEl.textContent = text; }
 
   // ---- Speech out ----
-  function say(text) {
+  let voiceOn = false;     // true when the server has an ElevenLabs voice configured
+  let audioEl = null;      // the audio currently playing
+  let speakToken = 0;      // changes on every stop, so a late download is not played after barge-in
+
+  fetch("/api/voice").then((r) => r.json()).then((d) => { voiceOn = !!d.enabled; }).catch(() => {});
+
+  function stopSpeaking() {
+    speakToken++;
     speechSynthesis.cancel();
+    if (audioEl) { audioEl.pause(); audioEl = null; }
+  }
+
+  function sayWithBrowser(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = langSel.value;
     speechSynthesis.speak(u);
+  }
+
+  async function say(text) {
+    stopSpeaking();
+    const token = speakToken;
+    if (!voiceOn) { sayWithBrowser(text); return; }
+    try {
+      setStatus("Preparing voice...");
+      const res = await fetch("/api/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, lang: langSel.value.slice(0, 2) }),
+      });
+      if (!res.ok) throw new Error("voice " + res.status);
+      const blob = await res.blob();
+      if (token !== speakToken) return;               // the user interrupted while it loaded
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.onended = () => URL.revokeObjectURL(audio.src);
+      audioEl = audio;
+      setStatus("");
+      await audio.play();
+    } catch (err) {
+      setStatus("");
+      if (token === speakToken) sayWithBrowser(text);  // fall back to the browser voice
+    }
   }
 
   // ---- Ask the backend ----
@@ -101,7 +139,7 @@
 
   // ---- Speech in ----
   speakBtn.addEventListener("click", () => {
-    speechSynthesis.cancel();           // barge-in: pressing Speak stops the agent talking
+    stopSpeaking();                     // barge-in: pressing Speak stops the agent talking
     if (!Recognition) {
       setStatus("Speech input needs Chrome or Edge. You can type instead.");
       return;
@@ -118,7 +156,7 @@
     recognizer.start();
   });
 
-  sendBtn.addEventListener("click", () => { speechSynthesis.cancel(); ask(input.value); input.value = ""; });
+  sendBtn.addEventListener("click", () => { stopSpeaking(); ask(input.value); input.value = ""; });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") sendBtn.click(); });
 </script>
 </body>

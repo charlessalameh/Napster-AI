@@ -13,12 +13,14 @@ No keys anywhere: DefaultAzureCredential uses the web app's Managed Identity on 
 
 import logging
 import os
+import re
 import time
 
+import httpx  # already installed as a dependency of the openai package
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizableTextQuery
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from openai import AzureOpenAI
 
 # Application Insights (only when running on Azure, where the connection string is set).
@@ -64,6 +66,48 @@ openai_client = AzureOpenAI(
 )
 
 search_client = SearchClient(SEARCH_ENDPOINT, SEARCH_INDEX, credential)
+
+# ---------------------------------------------------------------- Voice (optional)
+# ElevenLabs text-to-speech. The API key is NOT in the code or in Terraform: App Service reads it
+# from Key Vault (a Key Vault reference in the app settings, using the web app's managed identity)
+# and hands it to us as an ordinary environment variable. If it is missing, the page simply keeps
+# using the browser's own voice.
+ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "")
+ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL_ID", "") or "eleven_multilingual_v2"
+VOICE_ENABLED = bool(
+    ELEVEN_KEY
+    and not ELEVEN_KEY.startswith("@Microsoft.KeyVault")  # reference App Service could not resolve
+    and re.fullmatch(r"[A-Za-z0-9]{10,40}", ELEVEN_VOICE)
+)
+if ELEVEN_VOICE and not VOICE_ENABLED:
+    log.warning("ElevenLabs voice is configured but not usable (key missing or Key Vault reference unresolved).")
+
+MAX_SPEAK_CHARS = 800  # one spoken answer is short; this also caps what a single call can cost
+SPEAK_PER_MINUTE = 20  # per visitor address (gentle: the address header can be faked)
+SPEAK_CHARS_PER_DAY = 60_000  # all visitors together: the real cost cap. Resets at midnight UTC.
+_speak_hits: dict[str, list[float]] = {}
+_speak_day = {"day": "", "chars": 0}
+ARABIC = re.compile(r"[؀-ۿ]")
+
+
+def allow_speak(visitor: str, chars: int) -> bool:
+    """Tiny in-memory limiter: per-visitor rate plus a daily character budget."""
+    now = time.time()
+    if len(_speak_hits) > 1000:  # keep memory bounded
+        _speak_hits.clear()
+    hits = [t for t in _speak_hits.get(visitor, []) if now - t < 60]
+    if len(hits) >= SPEAK_PER_MINUTE:
+        return False
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    if _speak_day["day"] != today:
+        _speak_day.update(day=today, chars=0)
+    if _speak_day["chars"] + chars > SPEAK_CHARS_PER_DAY:
+        return False
+    hits.append(now)
+    _speak_hits[visitor] = hits
+    _speak_day["chars"] += chars
+    return True
 
 SYSTEM_PROMPT = """You are the front-desk assistant of Al Noor International School.
 You answer parents' questions by voice, so:
@@ -146,6 +190,53 @@ def chat():
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     log.info("answered in %d ms using %s", elapsed_ms, sources)
     return jsonify(answer=answer, sources=sources, ms=elapsed_ms)
+
+
+@app.get("/api/voice")
+def voice_status():
+    """Lets the page know whether to use the ElevenLabs voice or the browser's own."""
+    return jsonify(enabled=VOICE_ENABLED)
+
+
+@app.post("/api/speak")
+def speak():
+    """Text in, spoken audio (mp3) out, using the configured ElevenLabs voice."""
+    if not VOICE_ENABLED:
+        return jsonify(error="Voice is not configured."), 503
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", "")).strip()
+    lang = str(body.get("lang", "")).lower()[:2]
+    if not text:
+        return jsonify(error="Nothing to say."), 400
+    if len(text) > MAX_SPEAK_CHARS:
+        return jsonify(error=f"Text is too long (max {MAX_SPEAK_CHARS} characters)."), 400
+
+    visitor = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    if not allow_speak(visitor, len(text)):
+        return jsonify(error="Too many voice requests. Please try again later."), 429
+
+    payload = {"text": text, "model_id": ELEVEN_MODEL}
+    if ARABIC.search(text):
+        lang = "ar"
+    # language_code is only used by the faster Flash/Turbo models; the others work it out from the text.
+    if lang in ("en", "ar", "fr") and ("flash" in ELEVEN_MODEL or "turbo" in ELEVEN_MODEL):
+        payload["language_code"] = lang
+
+    try:
+        resp = httpx.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}",
+            params={"output_format": "mp3_44100_64"},
+            headers={"xi-api-key": ELEVEN_KEY},
+            json=payload,
+            timeout=30,
+        )
+    except httpx.HTTPError:
+        log.exception("ElevenLabs request failed")
+        return jsonify(error="Voice is unavailable."), 502
+    if resp.status_code != 200:
+        log.error("ElevenLabs returned HTTP %s: %s", resp.status_code, resp.text[:300])
+        return jsonify(error="Voice is unavailable."), 502
+    return Response(resp.content, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":
