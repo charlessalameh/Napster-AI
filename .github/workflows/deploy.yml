@@ -74,9 +74,27 @@ jobs:
         working-directory: infra
         run: terraform apply -input=false -auto-approve tfplan
 
+      # GitHub's login token is only valid for 5 minutes, and the apply above can take longer
+      # (OpenAI and Search are slow to create). Log in again so the az commands below get a fresh one.
+      - name: Azure login (refresh)
+        if: ${{ !inputs.plan_only }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Bootstrap search (upload docs, index, indexer)
         if: ${{ !inputs.plan_only }}
         run: ./scripts/bootstrap-search.sh
+
+      - name: Azure login (refresh before app deploy)
+        if: ${{ !inputs.plan_only }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy the web app
         if: ${{ !inputs.plan_only }}

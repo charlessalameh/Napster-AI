@@ -51,6 +51,18 @@ add_federated_credential() {
 }
 add_federated_credential "github-$BRANCH" "repo:$REPO:ref:refs/heads/$BRANCH"
 
+# Newer GitHub repos send an ID-based subject: repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:...
+# (the account and repo numbers are public; this form cannot be hijacked by re-creating the repo
+# under the same name). Add it too, looked up from GitHub's public API. Skipped if the lookup fails.
+REPO_JSON="$(curl -fsS "https://api.github.com/repos/$REPO" 2>/dev/null || true)"
+REPO_ID="$(printf '%s' "$REPO_JSON" | sed -n 's/^  "id": \([0-9]*\),.*/\1/p' | head -1)"
+OWNER_ID="$(printf '%s' "$REPO_JSON" | sed -n 's/^    "id": \([0-9]*\),.*/\1/p' | head -1)"
+if [[ -n "$REPO_ID" && -n "$OWNER_ID" ]]; then
+  add_federated_credential "github-$BRANCH-id" "repo:${REPO%%/*}@$OWNER_ID/${REPO##*/}@$REPO_ID:ref:refs/heads/$BRANCH"
+else
+  echo "Could not read the repo IDs from GitHub; only the name-based credential was added."
+fi
+
 # 4. Roles. Contributor creates resources; User Access Administrator lets Terraform
 #    create the RBAC role assignments between the services (Managed Identity design).
 assign_role() {
