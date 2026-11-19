@@ -103,17 +103,23 @@ jobs:
           APP=$(terraform -chdir=infra output -raw web_app_name)
           (cd app && zip -qr ../app.zip . -x '.venv/*' '__pycache__/*')
           # App Service builds it (SCM_DO_BUILD_DURING_DEPLOYMENT=true) and starts gunicorn.
-          # On a fresh build the empty web app crashes a few times (no app.py yet) and Azure blocks
-          # it for 2 minutes; an upload during that block can time out even though the site then
-          # starts fine. So: try up to 3 times, pausing between attempts.
-          for attempt in 1 2 3; do
-            if az webapp deploy --resource-group "$RG" --name "$APP" --src-path app.zip --type zip; then
+          # The CLI's own "wait until the site has started" check kept reporting "Starting the site..."
+          # for 10 minutes and then failed, although the site was answering fine. So upload without
+          # waiting (--async) and check the site ourselves: wait until /health answers 200.
+          az webapp deploy --resource-group "$RG" --name "$APP" --src-path app.zip --type zip --async true
+          URL=$(terraform -chdir=infra output -raw web_app_url)
+          echo "Upload accepted. Waiting for $URL/health (up to 15 minutes) ..."
+          sleep 45 # give the restart time to begin, so we do not read the old container's answer
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$URL/health" || true)
+            echo "  [$i] /health -> ${code:-none}"
+            if [ "$code" = "200" ]; then
+              echo "The web app is up."
               exit 0
             fi
-            echo "App deploy attempt $attempt failed; waiting 2 minutes before trying again ..."
-            sleep 120
+            sleep 20
           done
-          echo "App deploy failed after 3 attempts" >&2
+          echo "The web app did not become healthy in time. Check: az webapp log startup show -n $APP -g $RG" >&2
           exit 1
 
       - name: Smoke test
