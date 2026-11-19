@@ -103,7 +103,18 @@ jobs:
           APP=$(terraform -chdir=infra output -raw web_app_name)
           (cd app && zip -qr ../app.zip . -x '.venv/*' '__pycache__/*')
           # App Service builds it (SCM_DO_BUILD_DURING_DEPLOYMENT=true) and starts gunicorn.
-          az webapp deploy --resource-group "$RG" --name "$APP" --src-path app.zip --type zip
+          # On a fresh build the empty web app crashes a few times (no app.py yet) and Azure blocks
+          # it for 2 minutes; an upload during that block can time out even though the site then
+          # starts fine. So: try up to 3 times, pausing between attempts.
+          for attempt in 1 2 3; do
+            if az webapp deploy --resource-group "$RG" --name "$APP" --src-path app.zip --type zip; then
+              exit 0
+            fi
+            echo "App deploy attempt $attempt failed; waiting 2 minutes before trying again ..."
+            sleep 120
+          done
+          echo "App deploy failed after 3 attempts" >&2
+          exit 1
 
       - name: Smoke test
         if: ${{ !inputs.plan_only }}
